@@ -1458,7 +1458,7 @@ Details:
 
 **Preconditions:**
 - PRE-1. The course admin or instructor is logged into the system.
-- PRE-2. There exists at least one active student in the system.
+- PRE-2. The target student has an account in the system; that account may be active or deactivated.
 
 **Postconditions:**
 - POST-1. The student's account is deactivated.
@@ -1476,10 +1476,13 @@ Details:
 - **6a. The student is already logged in when deactivated:**
   - 6a1. Once deactivation is saved, the system denies the student's next protected request under FR-SEC-active-account, including a request using an otherwise-valid token issued before deactivation, without waiting for that token to expire.
   - 6a2. Deactivation completes without waiting for the student to make another request; continue at step 7.
+- **6b. The selected student is already deactivated, including deactivation after the warning was opened:**
+  - 6b1. The system applies BR-student-deactivation-idempotent and informs the course admin or instructor that the student is already deactivated.
+  - 6b2. Use case ends.
 
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
-**Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report
+**Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-student-deactivation-idempotent, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report
 
 **Associated Information:**
 - Consequence of the deactivation: The student will no longer be able to log in or submit weekly activity reports and peer evaluations, but the student's account and her previously submitted work are kept in the system. Deactivation will NOT remove the student from the system, and the account can be reactivated in the future (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete. The course admin or instructor shall be able to cancel the use case at any time prior to submitting it.
