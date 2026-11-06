@@ -33,6 +33,14 @@ public class UserService implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("username " + username + " is not found.")); // Otherwise, throw an exception.
     }
 
+    /**
+     * Whether the account a signed token names may still be used (FR-SEC-active-account). Looked up by the
+     * immutable user id, never the token's {@code sub} username, which a profile edit can change.
+     */
+    public boolean isAccountActive(Integer userId) {
+        return userId != null && this.userRepository.existsByIdAndEnabledTrue(userId);
+    }
+
     public boolean checkEmailExists(String email) {
         return this.userRepository.findByEmail(email).isPresent();
     }

@@ -72,6 +72,19 @@ public class SectionService {
     }
 
     /**
+     * The course section a caller asks to read by id, scoped to the caller: an enrolled student, an assigned
+     * instructor, or the course admin who owns its course (BR-section-scoped-access). Anything else is not found.
+     */
+    public Section findSectionInCallerScope(Integer sectionId) {
+        Integer callerId = this.userUtils.getUserId();
+        if (sectionId == null || callerId == null) {
+            throw new ObjectNotFoundException("section", sectionId);
+        }
+        return this.sectionRepository.findOne(SectionSpecs.hasId(sectionId).and(SectionSpecs.readableBy(callerId)))
+                .orElseThrow(() -> new ObjectNotFoundException("section", sectionId));
+    }
+
+    /**
      * Find sections with students that are eligible for weekly reminders in a given week.
      * <p>
      * Eligible sections are active sections that have the given week in their activeWeeks list.

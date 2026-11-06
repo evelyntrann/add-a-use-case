@@ -47,4 +47,18 @@ public class StudentSecurityService {
                 .anyMatch(instructor -> instructor.getId().equals(instructorIdFromJwt));
     }
 
+    /**
+     * Whether the caller may change this student's account lifecycle (BR-student-lifecycle): she is the course admin
+     * who owns the student's course, or an instructor assigned to the student's course section. A student, herself
+     * included, never may. Fails closed on an unknown student or an unidentifiable caller.
+     */
+    public boolean canManageStudentLifecycle(Integer studentId) {
+        Integer callerId = this.userUtils.getUserId();
+        if (studentId == null || callerId == null) {
+            return false;
+        }
+        return this.studentRepository.exists(
+                StudentSpecs.hasId(studentId).and(StudentSpecs.inLifecycleScopeOf(callerId)));
+    }
+
 }
