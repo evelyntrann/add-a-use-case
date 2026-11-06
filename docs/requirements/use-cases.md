@@ -1473,13 +1473,17 @@ Details:
 7. Use case ends.
 
 **Extensions:**
+- **6a. The student is already logged in when deactivated:**
+  - 6a1. Once deactivation is saved, the system denies the student's next protected request under FR-SEC-active-account, including a request using an otherwise-valid token issued before deactivation, without waiting for that token to expire.
+  - 6a2. Deactivation completes without waiting for the student to make another request; continue at step 7.
+
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
 **Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report
 
 **Associated Information:**
 - Consequence of the deactivation: The student will no longer be able to log in or submit weekly activity reports and peer evaluations, but the student's account and her previously submitted work are kept in the system. Deactivation will NOT remove the student from the system, and the account can be reactivated in the future (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete. The course admin or instructor shall be able to cancel the use case at any time prior to submitting it.
-- The warning in step 4 includes the consequences governed by BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, and BR-evaluation-inactive-report.
+- The warning in step 4 includes the consequences governed by BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report, and FR-SEC-active-account.
 
 **Related Use Cases:** UC-STU-delete-student: Delete a student; UC-STU-reactivate-student: Reactivate a student
 **Assumptions:**
