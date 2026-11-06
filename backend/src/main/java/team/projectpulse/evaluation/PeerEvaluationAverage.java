@@ -10,6 +10,7 @@ public class PeerEvaluationAverage {
     private String lastName;
     private String email;
     private String teamName;
+    private boolean enabled; // The student's current account status, not stored history
     private Double averageTotalScore;
     private List<String> publicComments;
     private List<String> privateComments;
@@ -57,6 +58,14 @@ public class PeerEvaluationAverage {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
     }
 
     public String getTeamName() {

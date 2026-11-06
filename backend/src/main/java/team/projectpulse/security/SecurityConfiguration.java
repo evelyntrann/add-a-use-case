@@ -22,7 +22,9 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
@@ -98,8 +100,10 @@ public class SecurityConfiguration {
 
     private final StudentInstructorAuthorizationManager studentInstructorAuthorizationManager;
 
+    private final StudentLifecycleAuthorizationManager studentLifecycleAuthorizationManager;
 
-    public SecurityConfiguration(CustomBasicAuthenticationEntryPoint customBasicAuthenticationEntryPoint, CustomBearerTokenAuthenticationEntryPoint customBearerTokenAuthenticationEntryPoint, CustomBearerTokenAccessDeniedHandler customBearerTokenAccessDeniedHandler, UserOwnershipAuthorizationManager userOwnershipAuthorizationManager, CourseOwnershipAuthorizationManager courseOwnershipAuthorizationManager, CourseMembershipAuthorizationManager courseMembershipAuthorizationManager, CriterionOwnershipAuthorizationManager criterionOwnershipAuthorizationManager, RubricOwnershipAuthorizationManager rubricOwnershipAuthorizationManager, CriterionMembershipAuthorizationManager criterionMembershipAuthorizationManager, RubricMembershipAuthorizationManager rubricMembershipAuthorizationManager, AssignCriterionToRubricAuthorizationManager assignCriterionToRubricAuthorizationManager, SectionMembershipAuthorizationManager sectionMembershipAuthorizationManager, SectionOwnershipAuthorizationManager sectionOwnershipAuthorizationManager, AssignRubricToSectionAuthorizationManager assignRubricToSectionAuthorizationManager, AssignInstructorToSectionAuthorizationManager assignInstructorToSectionAuthorizationManager, TeamMembershipAuthorizationManager teamMembershipAuthorizationManager, TeamOwnershipAuthorizationManager teamOwnershipAuthorizationManager, AssignStudentToTeamAuthorizationManager assignStudentToTeamAuthorizationManager, AssignInstructorToTeamAuthorizationManager assignInstructorToTeamAuthorizationManager, TransferTeamAuthorizationManager transferTeamAuthorizationManager, ActivityOwnershipAuthorizationManager activityOwnershipAuthorizationManager, ActivityMembershipAuthorizationManager activityMembershipAuthorizationManager, EvaluationOwnershipAuthorizationManager evaluationOwnershipAuthorizationManager, SectionInstructorAuthorizationManager sectionInstructorAuthorizationManager, StudentInstructorAuthorizationManager studentInstructorAuthorizationManager) throws NoSuchAlgorithmException {
+
+    public SecurityConfiguration(CustomBasicAuthenticationEntryPoint customBasicAuthenticationEntryPoint, CustomBearerTokenAuthenticationEntryPoint customBearerTokenAuthenticationEntryPoint, CustomBearerTokenAccessDeniedHandler customBearerTokenAccessDeniedHandler, UserOwnershipAuthorizationManager userOwnershipAuthorizationManager, CourseOwnershipAuthorizationManager courseOwnershipAuthorizationManager, CourseMembershipAuthorizationManager courseMembershipAuthorizationManager, CriterionOwnershipAuthorizationManager criterionOwnershipAuthorizationManager, RubricOwnershipAuthorizationManager rubricOwnershipAuthorizationManager, CriterionMembershipAuthorizationManager criterionMembershipAuthorizationManager, RubricMembershipAuthorizationManager rubricMembershipAuthorizationManager, AssignCriterionToRubricAuthorizationManager assignCriterionToRubricAuthorizationManager, SectionMembershipAuthorizationManager sectionMembershipAuthorizationManager, SectionOwnershipAuthorizationManager sectionOwnershipAuthorizationManager, AssignRubricToSectionAuthorizationManager assignRubricToSectionAuthorizationManager, AssignInstructorToSectionAuthorizationManager assignInstructorToSectionAuthorizationManager, TeamMembershipAuthorizationManager teamMembershipAuthorizationManager, TeamOwnershipAuthorizationManager teamOwnershipAuthorizationManager, AssignStudentToTeamAuthorizationManager assignStudentToTeamAuthorizationManager, AssignInstructorToTeamAuthorizationManager assignInstructorToTeamAuthorizationManager, TransferTeamAuthorizationManager transferTeamAuthorizationManager, ActivityOwnershipAuthorizationManager activityOwnershipAuthorizationManager, ActivityMembershipAuthorizationManager activityMembershipAuthorizationManager, EvaluationOwnershipAuthorizationManager evaluationOwnershipAuthorizationManager, SectionInstructorAuthorizationManager sectionInstructorAuthorizationManager, StudentInstructorAuthorizationManager studentInstructorAuthorizationManager, StudentLifecycleAuthorizationManager studentLifecycleAuthorizationManager) throws NoSuchAlgorithmException {
         this.customBasicAuthenticationEntryPoint = customBasicAuthenticationEntryPoint;
         this.customBearerTokenAuthenticationEntryPoint = customBearerTokenAuthenticationEntryPoint;
         this.customBearerTokenAccessDeniedHandler = customBearerTokenAccessDeniedHandler;
@@ -125,6 +129,7 @@ public class SecurityConfiguration {
         this.evaluationOwnershipAuthorizationManager = evaluationOwnershipAuthorizationManager;
         this.sectionInstructorAuthorizationManager = sectionInstructorAuthorizationManager;
         this.studentInstructorAuthorizationManager = studentInstructorAuthorizationManager;
+        this.studentLifecycleAuthorizationManager = studentLifecycleAuthorizationManager;
 
         // Generate a public/private key pair.
         KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
@@ -164,7 +169,9 @@ public class SecurityConfiguration {
                         // Security rules for the /sections/** endpoint.
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/sections/search").hasAuthority("ROLE_instructor")
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/sections").hasAuthority("ROLE_admin")
-                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/sections/{sectionId}").access(this.sectionMembershipAuthorizationManager)
+                        // Members read their course section; so does the course admin who owns its course without being assigned to it
+                        // (BR-section-scoped-access, UC-STU-deactivate-student step 2). The service reader scopes the same way.
+                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/sections/{sectionId}").access(AuthorizationManagers.anyOf(this.sectionMembershipAuthorizationManager, this.sectionOwnershipAuthorizationManager))
                         .requestMatchers(HttpMethod.PUT, this.baseUrl + "/sections/{sectionId}").access(this.sectionOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.DELETE, this.baseUrl + "/sections/{sectionId}").access(this.sectionOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/sections/{sectionId}/weeks").access(this.sectionOwnershipAuthorizationManager)
@@ -197,13 +204,16 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, this.baseUrl + "/instructors/{instructorId}").access(this.userOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.PUT, this.baseUrl + "/instructors/{instructorId}").access(this.userOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.DELETE, this.baseUrl + "/instructors/{instructorId}").access(this.userOwnershipAuthorizationManager)
-                        .requestMatchers(HttpMethod.PUT, this.baseUrl + "/instructors/sections/{sectionId}/default").access(this.sectionMembershipAuthorizationManager)
+                        .requestMatchers(HttpMethod.PUT, this.baseUrl + "/instructors/sections/{sectionId}/default").access(AuthorizationManagers.anyOf(this.sectionMembershipAuthorizationManager, this.sectionOwnershipAuthorizationManager))
                         .requestMatchers(HttpMethod.PUT, this.baseUrl + "/instructors/courses/{courseId}/default").access(this.courseMembershipAuthorizationManager)
 
                         // Security rules for the /students/** endpoint.
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/students/search").hasAuthority("ROLE_instructor")
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/students").permitAll()
-                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/students/{studentId}").access(this.userOwnershipAuthorizationManager)
+                        // The student herself or an assigned instructor (UserOwnership), or the owning course admin (StudentLifecycle)
+                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/students/{studentId}").access(AuthorizationManagers.anyOf(this.userOwnershipAuthorizationManager, this.studentLifecycleAuthorizationManager))
+                        // UC-STU-deactivate-student: the owning course admin or an assigned instructor, never the student (BR-student-lifecycle)
+                        .requestMatchers(HttpMethod.POST, this.baseUrl + "/students/{studentId}/deactivation").access(this.studentLifecycleAuthorizationManager)
                         .requestMatchers(HttpMethod.PUT, this.baseUrl + "/students/{studentId}").access(this.userOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.DELETE, this.baseUrl + "/students/{studentId}").access(this.userOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.GET, this.baseUrl + "/students/teams/{teamId}").access(this.teamMembershipAuthorizationManager)
@@ -220,9 +230,11 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/evaluations").authenticated()
                         .requestMatchers(HttpMethod.PUT, this.baseUrl + "/evaluations/{evaluationId}").access(this.evaluationOwnershipAuthorizationManager)
                         .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/evaluators/{evaluatorId}/week/{week}").access(this.userOwnershipAuthorizationManager)
-                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/sections/{sectionId}/week/{week}").access(this.sectionInstructorAuthorizationManager)
+                        // An assigned instructor or the owning course admin, as for submission status (BR-section-scoped-access)
+                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/sections/{sectionId}/week/{week}").access(AuthorizationManagers.anyOf(this.sectionInstructorAuthorizationManager, this.sectionOwnershipAuthorizationManager))
                         .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/students/{studentId}/week/{week}").access(this.userOwnershipAuthorizationManager)
-                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/students/{studentId}/week/{week}/details").access(this.studentInstructorAuthorizationManager)
+                        // Private comments included, so instructors and the owning course admin only (BR-evaluation-private-comment)
+                        .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/students/{studentId}/week/{week}/details").access(AuthorizationManagers.anyOf(this.studentInstructorAuthorizationManager, this.studentLifecycleAuthorizationManager))
                         .requestMatchers(HttpMethod.GET, this.baseUrl + "/evaluations/students/{studentId}").access(this.userOwnershipAuthorizationManager)
                         // Self-service: emails a receipt to the caller's own address, so authentication is the whole check.
                         .requestMatchers(HttpMethod.POST, this.baseUrl + "/evaluations/weeks/{week}/receipt").authenticated()
@@ -341,9 +353,16 @@ public class SecurityConfiguration {
         return new NimbusJwtEncoder(jwkSet);
     }
 
+    /**
+     * Verifies the signature, then validates the token's timestamps and, separately, that the account it names is still
+     * active (FR-SEC-active-account). The validator arrives as a method parameter rather than through the constructor:
+     * it needs {@code UserService}, which needs the {@code PasswordEncoder} this class defines.
+     */
     @Bean
-    public JwtDecoder jwtDecoder() {
-        return NimbusJwtDecoder.withPublicKey(this.publicKey).build();
+    public JwtDecoder jwtDecoder(ActiveAccountJwtValidator activeAccountJwtValidator) {
+        NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withPublicKey(this.publicKey).build();
+        jwtDecoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefault(), activeAccountJwtValidator));
+        return jwtDecoder;
     }
 
     @Bean

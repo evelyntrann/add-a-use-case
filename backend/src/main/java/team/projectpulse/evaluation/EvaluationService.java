@@ -2,12 +2,17 @@ package team.projectpulse.evaluation;
 
 import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
+import team.projectpulse.section.SectionSpecs;
+import team.projectpulse.system.UserUtils;
 import team.projectpulse.system.WeekKeys;
 import team.projectpulse.system.exception.PeerEvaluationIllegalArgumentException;
 import team.projectpulse.system.exception.ObjectNotFoundException;
 import team.projectpulse.student.Student;
 import team.projectpulse.student.StudentRepository;
+import team.projectpulse.student.StudentSpecs;
 import team.projectpulse.team.Team;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -34,23 +39,45 @@ public class EvaluationService {
     private static final String RUBRIC_MISMATCH_MESSAGE = "This evaluation was scored against a different set of criteria and can no longer be updated.";
     private static final String NOT_PREVIOUS_WEEK_MESSAGE = "You can only submit evaluations for the previous week.";
     private static final String WINDOW_CLOSED_MESSAGE = "The submission window for this peer evaluation has closed, so it can no longer be changed.";
+    static final String INACTIVE_EVALUATEE_MESSAGE = "The selected evaluatee is deactivated.";
 
     private final PeerEvaluationRepository evaluationRepository;
     private final StudentRepository studentRepository;
     private final SectionRepository sectionRepository;
     private final Clock clock; // Clock bean is defined in PeerEvaluationToolApplication.java, this object is for unit testing purposes.
+    private final UserUtils userUtils;
+    private final EntityManager entityManager;
 
 
-    public EvaluationService(PeerEvaluationRepository evaluationRepository, StudentRepository studentRepository, SectionRepository sectionRepository, Clock clock) {
+    public EvaluationService(PeerEvaluationRepository evaluationRepository, StudentRepository studentRepository, SectionRepository sectionRepository, Clock clock, UserUtils userUtils, EntityManager entityManager) {
         this.evaluationRepository = evaluationRepository;
         this.studentRepository = studentRepository;
         this.sectionRepository = sectionRepository;
         this.clock = clock;
+        this.userUtils = userUtils;
+        this.entityManager = entityManager;
     }
 
     public PeerEvaluation addPeerEvaluation(PeerEvaluation newPeerEvaluation) {
         // Make sure the submission week is one of the course section's active weeks and is still open for submission
         requireOpenSubmissionWindow(newPeerEvaluation.getEvaluator().getSection(), newPeerEvaluation.getWeek(), NOT_PREVIOUS_WEEK_MESSAGE);
+
+        // Lock and re-read both students before deciding anything about them, so the account state and team
+        // assignments below are the committed ones, not what the converter loaded before this transaction waited
+        // (BR-evaluation-active-evaluatee, BR-team-assignment-required). Lower id first, so two teammates evaluating
+        // each other at the same moment take the locks in the same order and cannot deadlock.
+        Student evaluator = newPeerEvaluation.getEvaluator();
+        Student evaluatee = newPeerEvaluation.getEvaluatee();
+        if (evaluator.getId() <= evaluatee.getId()) {
+            evaluator = lockAndRefresh(evaluator.getId());
+            evaluatee = evaluator.getId().equals(evaluatee.getId()) ? evaluator : lockAndRefresh(evaluatee.getId());
+        } else {
+            evaluatee = lockAndRefresh(evaluatee.getId());
+            evaluator = lockAndRefresh(evaluator.getId());
+        }
+        newPeerEvaluation.setEvaluator(evaluator);
+        newPeerEvaluation.setEvaluatee(evaluatee);
+        requireActiveEvaluatee(evaluatee);
 
         // Make sure the evaluator is on a team at all (BR-team-assignment-required): Student.team is optional,
         // because a student is enrolled in a course section before she is assigned to a team
@@ -76,17 +103,44 @@ public class EvaluationService {
     }
 
     public PeerEvaluation updatePeerEvaluation(Integer evaluationId, PeerEvaluation update) {
-        return this.evaluationRepository.findById(evaluationId)
+        // Scoped to the caller as its evaluator, so the route rule is not the only thing standing between a caller
+        // and someone else's evaluation
+        return this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(evaluationId, this.userUtils.getUserId())
                 .map(oldEvaluation -> {
                     // The week is read off the stored evaluation rather than off the update, because the caller
                     // writes the payload and could otherwise name an open week to reopen a closed evaluation.
                     requireOpenSubmissionWindow(oldEvaluation.getEvaluator().getSection(), oldEvaluation.getWeek(), WINDOW_CLOSED_MESSAGE);
+                    // Likewise the evaluatee is the stored one, whoever the body names (BR-evaluation-active-evaluatee)
+                    requireActiveEvaluatee(lockAndRefresh(oldEvaluation.getEvaluatee().getId()));
                     rescore(oldEvaluation, update.getRatings());
                     oldEvaluation.setPublicComment(update.getPublicComment());
                     oldEvaluation.setPrivateComment(update.getPrivateComment());
                     return this.evaluationRepository.save(oldEvaluation);
                 })
                 .orElseThrow(() -> new ObjectNotFoundException("evaluation", evaluationId));
+    }
+
+    /**
+     * The student as this transaction's managed instance, re-read from the database under a write lock that is held
+     * until commit. A deactivation holds the same lock, so a write that arrives while one is in flight waits for it
+     * and then sees the deactivated account. A lock without the refresh would leave whatever account state an earlier
+     * read in this request had cached.
+     */
+    private Student lockAndRefresh(Integer studentId) {
+        Student student = this.studentRepository.findById(studentId)
+                .orElseThrow(() -> new ObjectNotFoundException("student", studentId));
+        this.entityManager.refresh(student, LockModeType.PESSIMISTIC_WRITE);
+        return student;
+    }
+
+    /**
+     * Refuses creating or editing an evaluation of a deactivated student (BR-evaluation-active-evaluatee, extension 9a
+     * of UC-EVA-submit-evaluation). Evaluations already written of her are kept and still reported.
+     */
+    private void requireActiveEvaluatee(Student evaluatee) {
+        if (!evaluatee.isEnabled()) {
+            throw new PeerEvaluationIllegalArgumentException(INACTIVE_EVALUATEE_MESSAGE);
+        }
     }
 
     /**
@@ -178,6 +232,9 @@ public class EvaluationService {
         peerEvaluationAverage.setFirstName(student.getFirstName());
         peerEvaluationAverage.setLastName(student.getLastName());
         peerEvaluationAverage.setEmail(student.getEmail());
+        // The account's current state, not a historical one: an inactive student keeps her row in every week's report,
+        // labeled as such (BR-evaluation-inactive-report)
+        peerEvaluationAverage.setEnabled(student.isEnabled());
         // Student.team is optional: a student is enrolled in a course section before she is assigned to a team, and
         // BR-team-assignment-required keeps her from authoring until she is, so the team name is simply absent for
         // her. Dereferencing it here was a 500 on her own results page and on the instructor's performance dashboard
@@ -218,7 +275,15 @@ public class EvaluationService {
         // Create a new weekly peer evaluation report
         WeeklyPeerEvaluationReport report = new WeeklyPeerEvaluationReport();
 
-        report.setSectionName(this.sectionRepository.findById(sectionId).orElseThrow(() -> new ObjectNotFoundException("section", sectionId)).getSectionName());
+        // Scoped to the course sections the caller instructs or owns, independently of the route rule
+        Integer callerId = this.userUtils.getUserId();
+        Section section = callerId == null ? null : this.sectionRepository
+                .findOne(SectionSpecs.hasId(sectionId).and(SectionSpecs.instructedOrOwnedBy(callerId)))
+                .orElse(null);
+        if (section == null) {
+            throw new ObjectNotFoundException("section", sectionId);
+        }
+        report.setSectionName(section.getSectionName());
 
         // Get all students in the section
         List<Student> students = this.studentRepository.findBySectionSectionId(sectionId).stream().filter(student -> student.getTeam() != null).collect(Collectors.toList());
@@ -312,7 +377,16 @@ public class EvaluationService {
         return evaluateeIdsByEvaluator;
     }
 
+    /**
+     * Every evaluation written of a student for a week, private comments included, so only for an instructor of her
+     * course section or the course admin who owns its course (BR-evaluation-private-comment). The student herself is
+     * deliberately outside that scope.
+     */
     public List<PeerEvaluation> getWeeklyEvaluationsForStudent(Integer studentId, String week) {
+        Integer callerId = this.userUtils.getUserId();
+        if (callerId == null || !this.studentRepository.exists(StudentSpecs.hasId(studentId).and(StudentSpecs.inLifecycleScopeOf(callerId)))) {
+            throw new ObjectNotFoundException("student", studentId);
+        }
         return this.evaluationRepository.findByWeekAndEvaluateeId(week, studentId);
     }
 

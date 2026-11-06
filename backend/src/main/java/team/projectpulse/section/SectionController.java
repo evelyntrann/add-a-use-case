@@ -45,7 +45,7 @@ public class SectionController {
 
     @GetMapping("/{sectionId}")
     public Result findSectionById(@PathVariable Integer sectionId) {
-        Section section = this.sectionService.findSectionById(sectionId);
+        Section section = this.sectionService.findSectionInCallerScope(sectionId);
         SectionDto sectionDto = this.sectionToSectionDtoConverter.convert(section);
         return new Result(true, StatusCode.SUCCESS, "Find section successfully", sectionDto);
     }

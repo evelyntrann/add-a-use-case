@@ -42,7 +42,7 @@ public class StudentController {
 
     @GetMapping("/{studentId}")
     public Result findStudentById(@PathVariable Integer studentId) {
-        Student student = this.studentService.findStudentById(studentId);
+        Student student = this.studentService.findStudentInCallerScope(studentId);
         StudentDto studentDto = this.studentToStudentDtoConverter.convert(student);
         return new Result(true, StatusCode.SUCCESS, "Find student successfully", studentDto);
     }
@@ -68,6 +68,19 @@ public class StudentController {
         Student updatedStudent = this.studentService.updateStudent(studentId, update);
         StudentDto updatedStudentDto = this.studentToStudentDtoConverter.convert(updatedStudent);
         return new Result(true, StatusCode.SUCCESS, "Update student successfully", updatedStudentDto);
+    }
+
+    /**
+     * UC-STU-deactivate-student step 6. No request body: the action acts on the persisted student the path names and
+     * saves no profile edits. Both outcomes are successes; only the message differs (extension 6b).
+     */
+    @PostMapping("/{studentId}/deactivation")
+    public Result deactivateStudent(@PathVariable Integer studentId) {
+        DeactivationOutcome outcome = this.studentService.deactivateStudent(studentId);
+        String message = outcome == DeactivationOutcome.DEACTIVATED
+                ? "Student deactivated successfully"
+                : "Student is already deactivated";
+        return new Result(true, StatusCode.SUCCESS, message, null);
     }
 
     @DeleteMapping("/{studentId}")

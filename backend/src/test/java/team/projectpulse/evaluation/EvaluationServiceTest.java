@@ -1,6 +1,10 @@
 package team.projectpulse.evaluation;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.AfterEach;
+import org.mockito.InOrder;
+import org.springframework.data.jpa.domain.Specification;
 import team.projectpulse.instructor.Instructor;
 import team.projectpulse.rubric.Criterion;
 import team.projectpulse.rubric.Rubric;
@@ -8,6 +12,8 @@ import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
 import team.projectpulse.student.Student;
 import team.projectpulse.student.StudentRepository;
+import team.projectpulse.system.UserUtils;
+import team.projectpulse.system.exception.ObjectNotFoundException;
 import team.projectpulse.system.exception.PeerEvaluationIllegalArgumentException;
 import team.projectpulse.team.Team;
 import team.projectpulse.user.MyUserPrincipal;
@@ -29,7 +35,11 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willAnswer;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -44,6 +54,10 @@ class EvaluationServiceTest {
     SectionRepository sectionRepository;
     @Mock
     Clock clock; // Mock the clock bean
+    @Mock
+    UserUtils userUtils;
+    @Mock
+    EntityManager entityManager; // refresh(..., PESSIMISTIC_WRITE) is a no-op unless a test makes it change the student
 
     @InjectMocks
     EvaluationService evaluationService;
@@ -296,6 +310,19 @@ class EvaluationServiceTest {
         SecurityContextHolder.clearContext(); // Clear the security context after each test to avoid interference between tests
     }
 
+    /** The service re-reads each student it locks; answer those reads with the in-memory students. */
+    private void givenStudentsCanBeLocked(Student... students) {
+        for (Student student : students) {
+            given(this.studentRepository.findById(student.getId())).willReturn(Optional.of(student));
+        }
+    }
+
+    private void givenClockOn(LocalDate date) {
+        Clock fixedClock = Clock.fixed(date.atStartOfDay(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
+        given(this.clock.instant()).willReturn(fixedClock.instant());
+        given(this.clock.getZone()).willReturn(fixedClock.getZone());
+    }
+
     @Test
     void testAddPeerEvaluationSuccess() {
         // Given
@@ -305,6 +332,7 @@ class EvaluationServiceTest {
         given(this.clock.getZone()).willReturn(fixedClock.getZone());
 
         PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", amanda, woody, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(amanda, woody);
         given(this.evaluationRepository.save(newPeerEvaluation)).willReturn(newPeerEvaluation);
 
         // When
@@ -361,6 +389,7 @@ class EvaluationServiceTest {
         given(this.clock.getZone()).willReturn(fixedClock.getZone());
 
         PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", eric, woody, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(eric, woody);
 
         // When
         Throwable throwable = catchThrowable(() -> this.evaluationService.addPeerEvaluation(newPeerEvaluation));
@@ -381,7 +410,9 @@ class EvaluationServiceTest {
 
         // Tracy is enrolled in the course section but has not been assigned to a team
         Student tracy = new Student("tracy", "Tracy", "Nicholson", "t.nicholson@abc.edu", "123456", true, "student");
+        tracy.setId(16);
         this.eric.getSection().addStudent(tracy);
+        givenStudentsCanBeLocked(tracy, this.eric);
 
         PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", tracy, this.eric, List.of(), "public comment", "private comment");
 
@@ -403,6 +434,7 @@ class EvaluationServiceTest {
         given(this.clock.getZone()).willReturn(fixedClock.getZone());
 
         PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", john, eric, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(john, eric);
         given(this.evaluationRepository.findByWeekAndEvaluatorIdAndEvaluateeId("2023-W31", 3, 4)).willReturn(Optional.of(newPeerEvaluation));
 
         // When
@@ -429,7 +461,9 @@ class EvaluationServiceTest {
         PeerEvaluation update = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "new public comment", "new private comment");
         update.setPeerEvaluationId(1);
 
-        given(this.evaluationRepository.findById(1)).willReturn(Optional.of(oldPeerEvaluation));
+        given(this.userUtils.getUserId()).willReturn(3); // John, the evaluator
+        given(this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(1, 3)).willReturn(Optional.of(oldPeerEvaluation));
+        givenStudentsCanBeLocked(this.eric);
         given(this.evaluationRepository.save(oldPeerEvaluation)).willReturn(oldPeerEvaluation);
 
         // When
@@ -439,7 +473,8 @@ class EvaluationServiceTest {
         assertThat(updatedPeerEvaluation.getPeerEvaluationId()).isEqualTo(update.getPeerEvaluationId());
         assertThat(updatedPeerEvaluation.getPublicComment()).isEqualTo(update.getPublicComment());
         assertThat(updatedPeerEvaluation.getPrivateComment()).isEqualTo(update.getPrivateComment());
-        verify(this.evaluationRepository, times(1)).findById(1);
+        verify(this.evaluationRepository, times(1)).findByPeerEvaluationIdAndEvaluatorId(1, 3);
+        verify(this.entityManager).refresh(this.eric, LockModeType.PESSIMISTIC_WRITE);
         verify(this.evaluationRepository, times(1)).save(oldPeerEvaluation);
     }
 
@@ -458,7 +493,8 @@ class EvaluationServiceTest {
         PeerEvaluation update = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "new public comment", "new private comment");
         update.setPeerEvaluationId(1);
 
-        given(this.evaluationRepository.findById(1)).willReturn(Optional.of(oldPeerEvaluation));
+        given(this.userUtils.getUserId()).willReturn(3);
+        given(this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(1, 3)).willReturn(Optional.of(oldPeerEvaluation));
 
         // When
         Throwable throwable = catchThrowable(() -> this.evaluationService.updatePeerEvaluation(1, update));
@@ -481,7 +517,8 @@ class EvaluationServiceTest {
         PeerEvaluation update = new PeerEvaluation("2023-W25", this.john, this.eric, List.of(), "new public comment", "new private comment");
         update.setPeerEvaluationId(1);
 
-        given(this.evaluationRepository.findById(1)).willReturn(Optional.of(oldPeerEvaluation));
+        given(this.userUtils.getUserId()).willReturn(3);
+        given(this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(1, 3)).willReturn(Optional.of(oldPeerEvaluation));
 
         // When
         Throwable throwable = catchThrowable(() -> this.evaluationService.updatePeerEvaluation(1, update));
@@ -562,7 +599,8 @@ class EvaluationServiceTest {
     @Test
     void testGenerateWeeklyPeerEvaluationReportForSection() {
         // Given
-        given(this.sectionRepository.findById(anyInt())).willReturn(Optional.of(new Section("2023-2024", LocalDate.of(2023, 8, 14), LocalDate.of(2024, 4, 29), true, DayOfWeek.MONDAY, LocalTime.of(23, 59), DayOfWeek.TUESDAY, LocalTime.of(23, 59))));
+        given(this.userUtils.getUserId()).willReturn(1);
+        given(this.sectionRepository.findOne(any(Specification.class))).willReturn(Optional.of(new Section("2023-2024", LocalDate.of(2023, 8, 14), LocalDate.of(2024, 4, 29), true, DayOfWeek.MONDAY, LocalTime.of(23, 59), DayOfWeek.TUESDAY, LocalTime.of(23, 59))));
         given(this.studentRepository.findBySectionSectionId(anyInt())).willReturn(this.students);
         given(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 3)).willReturn(this.johnsEvaluations);
         given(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 4)).willReturn(this.ericsW31Evaluations);
@@ -650,6 +688,8 @@ class EvaluationServiceTest {
     @Test
     void testGetWeeklyEvaluationsForStudent() {
         // Given
+        given(this.userUtils.getUserId()).willReturn(1);
+        given(this.studentRepository.exists(any(Specification.class))).willReturn(true);
         given(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 4)).willReturn(this.ericsW31Evaluations);
 
         // When
@@ -671,6 +711,159 @@ class EvaluationServiceTest {
         assertThat(peerEvaluations.get(2).getEvaluator().getId()).isEqualTo(5);
         assertThat(peerEvaluations.get(2).getWeek()).isEqualTo("2023-W31");
         assertThat(peerEvaluations.get(2).getTotalScore()).isCloseTo(49.0, within(0.01));
+    }
+
+    @Test
+    void testAddPeerEvaluationOfInactiveEvaluatee() {
+        // Given
+        // The converter loaded Eric while his account was active; a deactivation commits while this request waits
+        // on his row lock, so the refresh is what reveals it (BR-evaluation-active-evaluatee, EVA extension 9a)
+        givenClockOn(LocalDate.of(2023, 8, 8));
+        PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(this.john, this.eric);
+        willAnswer(invocation -> {
+            if (invocation.getArgument(0) == this.eric) {
+                this.eric.setEnabled(false);
+            }
+            return null;
+        }).given(this.entityManager).refresh(any(Student.class), eq(LockModeType.PESSIMISTIC_WRITE));
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.addPeerEvaluation(newPeerEvaluation));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(PeerEvaluationIllegalArgumentException.class)
+                .hasMessage("The selected evaluatee is deactivated.");
+        verify(this.evaluationRepository, never()).save(any(PeerEvaluation.class));
+    }
+
+    @Test
+    void testAddPeerEvaluationRechecksTeamAfterTheLock() {
+        // Given
+        // Eric is removed from the team while this request waits; the team comparison reads the refreshed state
+        givenClockOn(LocalDate.of(2023, 8, 8));
+        PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(this.john, this.eric);
+        willAnswer(invocation -> {
+            if (invocation.getArgument(0) == this.eric) {
+                this.eric.getTeam().removeStudent(this.eric);
+            }
+            return null;
+        }).given(this.entityManager).refresh(any(Student.class), eq(LockModeType.PESSIMISTIC_WRITE));
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.addPeerEvaluation(newPeerEvaluation));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(PeerEvaluationIllegalArgumentException.class)
+                .hasMessage("The evaluator and evaluatee must be on the same team.");
+        verify(this.evaluationRepository, never()).save(any(PeerEvaluation.class));
+    }
+
+    @Test
+    void testAddPeerEvaluationLocksTheLowerIdFirst() {
+        // Given
+        // Eric (4) evaluating John (3) locks John first, the same order John evaluating Eric uses, so the two cannot deadlock
+        givenClockOn(LocalDate.of(2023, 8, 8));
+        PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", this.eric, this.john, List.of(), "public comment", "private comment");
+        givenStudentsCanBeLocked(this.john, this.eric);
+        given(this.evaluationRepository.save(newPeerEvaluation)).willReturn(newPeerEvaluation);
+
+        // When
+        this.evaluationService.addPeerEvaluation(newPeerEvaluation);
+
+        // Then
+        InOrder lockOrder = inOrder(this.entityManager);
+        lockOrder.verify(this.entityManager).refresh(this.john, LockModeType.PESSIMISTIC_WRITE);
+        lockOrder.verify(this.entityManager).refresh(this.eric, LockModeType.PESSIMISTIC_WRITE);
+    }
+
+    @Test
+    void testUpdatePeerEvaluationOfInactiveStoredEvaluatee() {
+        // Given
+        // The stored evaluatee is Eric, now deactivated; the body naming Woody, who is active, changes nothing
+        givenClockOn(LocalDate.of(2023, 8, 8));
+        this.eric.setEnabled(false);
+        PeerEvaluation oldPeerEvaluation = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "public comment", "private comment");
+        oldPeerEvaluation.setPeerEvaluationId(1);
+        PeerEvaluation update = new PeerEvaluation("2023-W31", this.john, this.woody, List.of(), "new public comment", "new private comment");
+        given(this.userUtils.getUserId()).willReturn(3);
+        given(this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(1, 3)).willReturn(Optional.of(oldPeerEvaluation));
+        givenStudentsCanBeLocked(this.eric);
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.updatePeerEvaluation(1, update));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(PeerEvaluationIllegalArgumentException.class)
+                .hasMessage("The selected evaluatee is deactivated.");
+        assertThat(oldPeerEvaluation.getPublicComment()).isEqualTo("public comment");
+        assertThat(oldPeerEvaluation.getPrivateComment()).isEqualTo("private comment");
+        verify(this.evaluationRepository, never()).save(any(PeerEvaluation.class));
+    }
+
+    @Test
+    void testUpdatePeerEvaluationOfAnotherEvaluatorIsNotFound() {
+        // Given
+        // Jerry (5) names evaluation 1, which John wrote: the owner-scoped lookup finds nothing
+        given(this.userUtils.getUserId()).willReturn(5);
+        given(this.evaluationRepository.findByPeerEvaluationIdAndEvaluatorId(1, 5)).willReturn(Optional.empty());
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.updatePeerEvaluation(1, new PeerEvaluation()));
+
+        // Then
+        assertThat(throwable).isInstanceOf(ObjectNotFoundException.class);
+        verify(this.evaluationRepository, never()).save(any(PeerEvaluation.class));
+    }
+
+    @Test
+    void testPeerEvaluationAverageCarriesCurrentAccountStatus() {
+        // Given
+        this.eric.setEnabled(false);
+        given(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 4)).willReturn(this.ericsW31Evaluations);
+
+        // When
+        PeerEvaluationAverage inactive = this.evaluationService.getPeerEvaluationAverage("2023-W31", this.eric);
+        PeerEvaluationAverage active = this.evaluationService.getPeerEvaluationAverage("2023-W32", this.john);
+
+        // Then
+        // Eric keeps his stored scores and comments, labeled inactive (BR-evaluation-inactive-report)
+        assertThat(inactive.isEnabled()).isFalse();
+        assertThat(inactive.getAverageTotalScore()).isCloseTo(50.0, within(0.01));
+        assertThat(inactive.getPublicComments()).hasSize(3);
+        assertThat(active.isEnabled()).isTrue();
+    }
+
+    @Test
+    void testGenerateWeeklyPeerEvaluationReportForSectionOutOfScope() {
+        // Given
+        given(this.userUtils.getUserId()).willReturn(3);
+        given(this.sectionRepository.findOne(any(Specification.class))).willReturn(Optional.empty());
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.generateWeeklyPeerEvaluationReportForSection(2, "2023-W31"));
+
+        // Then
+        assertThat(throwable).isInstanceOf(ObjectNotFoundException.class);
+        verify(this.studentRepository, never()).findBySectionSectionId(anyInt());
+    }
+
+    @Test
+    void testGetWeeklyEvaluationsForStudentOutOfScope() {
+        // Given
+        given(this.userUtils.getUserId()).willReturn(3);
+        given(this.studentRepository.exists(any(Specification.class))).willReturn(false);
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.getWeeklyEvaluationsForStudent(4, "2023-W31"));
+
+        // Then
+        assertThat(throwable).isInstanceOf(ObjectNotFoundException.class);
+        verify(this.evaluationRepository, never()).findByWeekAndEvaluateeId(anyString(), anyInt());
     }
 
 }

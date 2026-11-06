@@ -17,6 +17,8 @@ public interface PeerEvaluationRepository extends JpaRepository<PeerEvaluation, 
 
     List<PeerEvaluation> findByWeekAndEvaluatorId(String week, Integer evaluatorId);
 
+    Optional<PeerEvaluation> findByPeerEvaluationIdAndEvaluatorId(Integer peerEvaluationId, Integer evaluatorId);
+
     /**
      * Every (evaluator id, evaluatee id) pair recorded for a week among the course section's students.
      */

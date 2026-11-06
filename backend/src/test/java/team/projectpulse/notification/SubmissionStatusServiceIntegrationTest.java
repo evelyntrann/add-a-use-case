@@ -65,6 +65,18 @@ class SubmissionStatusServiceIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void testADeactivatedStudentOwesNeitherItem() {
+        // Given: Woody owes both items in the seed data (UC-STU-deactivate-student, BR-submission-owed)
+        Student woody = this.entityManager.createQuery("select s from Student s where s.email = 'w.allen@abc.edu'", Student.class).getSingleResult();
+        woody.setEnabled(false);
+        this.entityManager.flush();
+
+        // Then
+        assertThat(names(this.submissionStatusService.findOwing(SECTION_ID, SubmittableItem.WEEKLY_ACTIVITY_REPORT, WEEK))).doesNotContain("Woody Allen");
+        assertThat(names(this.submissionStatusService.findOwing(SECTION_ID, SubmittableItem.PEER_EVALUATION, WEEK))).doesNotContain("Woody Allen");
+    }
+
+    @Test
     void testAnEvaluationOfADeactivatedTeammateIsNotRequired() {
         // Given: Jerry's account is deactivated, and Team1's evaluations of him are deleted
         Student jerry = this.entityManager.createQuery("select s from Student s where s.email = 'j.moon@abc.edu'", Student.class).getSingleResult();
