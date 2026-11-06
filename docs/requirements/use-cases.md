@@ -1477,6 +1477,9 @@ Details:
   - 1a1. The system refuses the request under BR-student-lifecycle, BR-section-scoped-access, and FR-SEC-deny-unauthorized and informs the requester that access is denied.
   - 1a2. The student's account, team assignment, and submitted work remain unchanged.
   - 1a3. Use case ends.
+- **4a. The course admin or instructor cancels or closes the confirmation warning:**
+  - 4a1. The system closes the warning without sending a deactivation request. The student's account, team assignment, and submitted work remain unchanged.
+  - 4a2. Use case ends.
 - **6a. The student is already logged in when deactivated:**
   - 6a1. Once deactivation is saved, the system denies the student's next protected request under FR-SEC-active-account, including a request using an otherwise-valid token issued before deactivation, without waiting for that token to expire.
   - 6a2. Deactivation completes without waiting for the student to make another request; continue at step 7.
@@ -1489,8 +1492,8 @@ Details:
 **Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-student-deactivation-idempotent, BR-section-scoped-access, BR-role-based-access, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report
 
 **Associated Information:**
-- Consequence of the deactivation: The student will no longer be able to log in or submit weekly activity reports and peer evaluations, but the student's account and her previously submitted work are kept in the system. Deactivation will NOT remove the student from the system, and the account can be reactivated in the future (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete. The course admin or instructor shall be able to cancel the use case at any time prior to submitting it.
-- The warning in step 4 includes the consequences governed by BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report, and FR-SEC-active-account.
+- Lifecycle consequences and the distinction from deletion follow BR-student-lifecycle. Reactivation is specified by UC-STU-reactivate-student; deletion is specified by UC-STU-delete-student.
+- The warning in step 4 includes the consequences governed by BR-student-lifecycle, BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report, and FR-SEC-active-account.
 - The system checks authorization under BR-student-lifecycle and FR-SEC-authorization when processing step 6, including a repeated request under extension 6b. Permission lost after opening the warning causes extension 1a before any change or already-deactivated response.
 
 **Related Use Cases:** UC-STU-delete-student: Delete a student; UC-STU-reactivate-student: Reactivate a student
