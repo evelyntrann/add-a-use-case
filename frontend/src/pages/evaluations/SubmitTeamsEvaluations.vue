@@ -150,7 +150,7 @@ const peerEvalutions = ref<PeerEvaluation[]>()
 
 const loading = ref<boolean>(false)
 
-let isNewSubmission = true // Flag to indicate if this is a new submission or an update
+const isNewSubmission = ref(true) // Whether this is a new submission or an update
 
 const teamId = ref<number>(NaN) // Team ID of the student
 
@@ -194,8 +194,14 @@ async function loadCriteria() {
   criteria.value = rubricResult.data.criteria!
 }
 
-// Create starting peer evaluations
+// Create starting peer evaluations. Both new forms and forms loaded from saved evaluations show only teammates whose
+// account is active: a deactivated teammate can no longer be evaluated (BR-evaluation-active-evaluatee), though the
+// evaluations already written of her are kept and still reported. The roster is the one source of eligibility.
 async function prepareStartingPeerEvaluations() {
+  const activeTeammateIds = new Set(
+    students.value.filter((student) => student.enabled).map((student) => student.id as number)
+  )
+
   // Get the evaluations for the current week
   const result: FetchPeerEvaluationsResponse = await getEvaluationsByEvaluatorIdAndWeek(
     (userInfoStore.userInfo as Student).id as number,
@@ -204,39 +210,62 @@ async function prepareStartingPeerEvaluations() {
 
   // If the student has already submitted evaluations for the current week, load them
   if (result.data.length > 0) {
-    peerEvalutions.value = result.data
-    isNewSubmission = false
+    peerEvalutions.value = result.data.filter((evaluation) =>
+      activeTeammateIds.has(evaluation.evaluateeId)
+    )
+    isNewSubmission.value = false
   } else {
     // If not, create a new set of evaluations
-    isNewSubmission = true
-    peerEvalutions.value = students.value.map((student) => ({
-      week: previousWeek.value,
-      evaluatorId: (userInfoStore.userInfo as Student).id as number,
-      evaluateeId: student.id as number,
-      evaluateeName: `${student.firstName} ${student.lastName}`,
-      ratings: criteria.value.map((criterion) => ({
-        criterionId: criterion.criterionId as number,
-        criterion: criterion.criterion,
-        actualScore: 10 // Default score, can be changed by the user
-      })),
-      publicComment: '',
-      privateComment: ''
-    }))
+    isNewSubmission.value = true
+    peerEvalutions.value = students.value
+      .filter((student) => activeTeammateIds.has(student.id as number))
+      .map((student) => ({
+        week: previousWeek.value,
+        evaluatorId: (userInfoStore.userInfo as Student).id as number,
+        evaluateeId: student.id as number,
+        evaluateeName: `${student.firstName} ${student.lastName}`,
+        ratings: criteria.value.map((criterion) => ({
+          criterionId: criterion.criterionId as number,
+          criterion: criterion.criterion,
+          actualScore: 10 // Default score, can be changed by the user
+        })),
+        publicComment: '',
+        privateComment: ''
+      }))
+  }
+}
+
+// After a refused save, for example of a teammate deactivated since this page loaded, rebuild the forms from the
+// current roster and saved evaluations rather than retrying. The shared request interceptor has shown the error.
+async function reloadAfterFailedSave() {
+  loading.value = true
+  try {
+    await loadStudents()
+    await prepareStartingPeerEvaluations()
+  } finally {
+    loading.value = false
   }
 }
 
 // Submit peer evaluations
 async function submitPeerEvaluations() {
   if (peerEvalutions.value) {
+    isLoading.value = true
     const submitPromises = peerEvalutions.value.map(async (evaluation) => {
       const result: SubmitPeerEvaluationResponse = await submitEvaluation(evaluation)
       return result.data
     })
-    isLoading.value = true
-    peerEvalutions.value = await Promise.all(submitPromises) // Wait for all promises to resolve
-    isNewSubmission = false // Change to update mode
+    try {
+      peerEvalutions.value = await Promise.all(submitPromises) // Wait for all promises to resolve
+    } catch {
+      await Promise.allSettled(submitPromises) // Let the other saves finish, so the reload sees them
+      await reloadAfterFailedSave()
+      return
+    } finally {
+      isLoading.value = false
+    }
+    isNewSubmission.value = false // Change to update mode
     ElMessage.success('Peer evaluations submitted successfully')
-    isLoading.value = false
 
     // Send an submission confirmation email to the submitter
     await sendPeerEvaluationSubmissionConfirmationEmail(previousWeekRange.value)
@@ -247,15 +276,21 @@ async function submitPeerEvaluations() {
 // Update peer evaluations
 async function updatePeerEvaluations() {
   if (peerEvalutions.value) {
+    isLoading.value = true
     const submitPromises = peerEvalutions.value.map(async (evaluation) => {
       const result: UpdatePeerEvaluationResponse = await updateEvaluation(evaluation)
       return result.data
     })
-
-    isLoading.value = true
-    peerEvalutions.value = await Promise.all(submitPromises) // Wait for all promises to resolve
+    try {
+      peerEvalutions.value = await Promise.all(submitPromises) // Wait for all promises to resolve
+    } catch {
+      await Promise.allSettled(submitPromises)
+      await reloadAfterFailedSave()
+      return
+    } finally {
+      isLoading.value = false
+    }
     ElMessage.success('Peer evaluations updated successfully')
-    isLoading.value = false
   }
 }
 </script>
