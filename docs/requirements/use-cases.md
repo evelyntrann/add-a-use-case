@@ -1475,11 +1475,11 @@ Details:
 **Extensions:**
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
-**Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee
+**Business Rules:** BR-student-lifecycle, BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, BR-evaluation-inactive-report
 
 **Associated Information:**
 - Consequence of the deactivation: The student will no longer be able to log in or submit weekly activity reports and peer evaluations, but the student's account and her previously submitted work are kept in the system. Deactivation will NOT remove the student from the system, and the account can be reactivated in the future (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete. The course admin or instructor shall be able to cancel the use case at any time prior to submitting it.
-- The warning in step 4 includes the consequences governed by BR-student-deactivation-team, BR-submission-owed, and BR-evaluation-active-evaluatee.
+- The warning in step 4 includes the consequences governed by BR-student-deactivation-team, BR-submission-owed, BR-evaluation-active-evaluatee, and BR-evaluation-inactive-report.
 
 **Related Use Cases:** UC-STU-delete-student: Delete a student; UC-STU-reactivate-student: Reactivate a student
 **Assumptions:**
@@ -2344,32 +2344,34 @@ Report generating algorithm: For each individual criterion score (e.g., Quality 
 - **4a. Input validation rule violation:**
   - 4a1. The system alerts the instructor that an input validation rule is violated and displays the nature and location of the error.
   - 4a2. The instructor corrects the mistake and returns to step 4 of the normal flow.
-- **5a. No data is returned:**
-  - 5a1. The system alerts the instructor that no data is available in the generated report.
+- **5a. No student rows are returned:**
+  - 5a1. The system alerts the instructor that no students are available for inclusion in the generated report.
   - 5a2. The instructor either chooses to return to step 3 of the normal flow or chooses to terminate the use case.
 
 **Priority:** High
 **Frequency of Use:** Approximately 2 users, average of 1 usage per week.
-**Business Rules:** BR-section-scoped-access (the instructor may generate the report only for a course section she is assigned to), BR-evaluation-private-comment, BR-submission-owed (who has not turned in the peer evaluation)
+**Business Rules:** BR-section-scoped-access (the instructor may generate the report only for a course section she is assigned to), BR-evaluation-private-comment, BR-submission-owed (who has not turned in the peer evaluation), BR-evaluation-inactive-report
 
 **Associated Information:**
 
 Report generating parameters:
 - Active week: Each peer evaluation report is associated with a week. The instructor shall first indicate for which active week she wants to generate a peer evaluation. E.g., "02-12-2024 to 02-18-2024"; by default, it shall be the previous week.
-- Columns to include: student name, grade, comments. See the example below.
+- Columns to include: student name, current account status (BR-evaluation-inactive-report), grade, comments. See the example below.
 - Sorting criteria: by default, sort by last name in ascending order.
 - Pagination: Not needed.
 - Format of the generated report: HTML.
 
 An example of the generated report:
 
-| student | Grade | Commented by | Public comments | Private comments |
-| ---- | ---- | ---- | ---- | ---- |
-| John Doe | 54/60 | Tim Smith | Good work. | Nothing. |
-|  |  | Lily Fisher | Need to work harder. | Dr. Wei, I need to talk more about John. |
-| Lily Fisher | … | … | … | … |
+| student | Current account status | Grade | Commented by | Public comments | Private comments |
+| ---- | ---- | ---- | ---- | ---- | ---- |
+| John Doe | Active | 54/60 | Tim Smith | Good work. | Nothing. |
+|  |  |  | Lily Fisher | Need to work harder. | Dr. Wei, I need to talk more about John. |
+| Lily Fisher | Inactive | … | … | … | … |
 
 The report shall show who did not turn in the peer evaluation for that week, meaning the students who owe it (BR-submission-owed).
+
+Student inclusion and current-account-status display follow BR-evaluation-inactive-report. A student row without saved evaluations does not trigger extension 5a.
 
 Report generating algorithm: How to compute the peer evaluation grade for a student? Each student receives multiple peer evaluations from her teammates every week. First, obtain the peer evaluations received by a student for that week. For each peer evaluation, compute a total score by adding up the individual criterion scores. Then compute the average of the total scores across the peer evaluations. For example, John Doe receives two peer evaluations from Tim Smith and Lily Fisher, respectively. Tim Smith gives the following scores based on the rubric: 10, 9, 10, 9, 10, 10. So the total score given by Tim is 58. Lily Fisher gives the following scores based on the rubric: 5, 5, 10, 10, 10, 10. So the total score given by Tim is 50. The grade that John Doe receives that week is (58 + 50) / 2 = 54.
 
