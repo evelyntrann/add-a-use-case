@@ -83,6 +83,19 @@ class OwningAdminRouteIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
+    void testOwningAdminUnassignedListsTheCourseSectionAndSearchesItsStudents() throws Exception {
+        // Step 2's path to the student: find the course section in her course, select it, then search its students
+        this.mockMvc.perform(post(this.baseUrl + "/sections/search").contentType("application/json").content("{}").header(HttpHeaders.AUTHORIZATION, this.weiToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[?(@.sectionId == 2)]").exists());
+        this.mockMvc.perform(put(this.baseUrl + "/instructors/sections/2/default").header(HttpHeaders.AUTHORIZATION, this.weiToken))
+                .andExpect(status().isOk());
+        this.mockMvc.perform(post(this.baseUrl + "/students/search").contentType("application/json").content("{\"firstName\":\"John\"}").header(HttpHeaders.AUTHORIZATION, this.weiToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content[0].id").value(4));
+    }
+
+    @Test
     void testAnotherCoursesAdminIsRefusedEveryOne() throws Exception {
         for (MockHttpServletRequestBuilder request : ownerReads()) {
             this.mockMvc.perform(request.header(HttpHeaders.AUTHORIZATION, this.timToken))
