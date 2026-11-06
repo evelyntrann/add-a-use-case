@@ -5,6 +5,7 @@ import type {
   SearchStudentByCriteriaResponse,
   CreateStudentResponse,
   DeleteStudentResponse,
+  DeactivateStudentResponse,
   FindStudentByIdResponse,
   UpdateStudentResponse,
   Student,
@@ -39,3 +40,7 @@ export const updateStudent = (updatedStudent: Student) =>
 
 export const deleteStudent = (id: number) =>
   request.delete<any, DeleteStudentResponse>(`${API.STUDENTS_ENDPOINT}/${id}`)
+
+// UC-STU-deactivate-student: a dedicated action with no body, acting on the persisted student, never a profile save
+export const deactivateStudent = (id: number) =>
+  request.post<any, DeactivateStudentResponse>(`${API.STUDENTS_ENDPOINT}/${id}/deactivation`)

@@ -102,3 +102,11 @@ export interface DeleteStudentResponse {
   message: string
   data: null
 }
+
+// Both outcomes are successes; the message says whether the student was deactivated now or already was
+export interface DeactivateStudentResponse {
+  flag: boolean
+  code: number
+  message: string
+  data: null
+}
