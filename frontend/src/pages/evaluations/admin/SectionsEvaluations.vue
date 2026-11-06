@@ -34,6 +34,14 @@
       <el-table-column label="Student" min-width="100px" fixed>
         <template #default="{ row }"> {{ row.lastName }}, {{ row.firstName }} </template>
       </el-table-column>
+      <!-- A deactivated student keeps her row, scores and comments in every week's report, labeled by her current
+           account status (BR-evaluation-inactive-report) -->
+      <el-table-column label="Current account status" min-width="110px" fixed>
+        <template #default="{ row }">
+          <el-tag v-if="row.enabled" type="success" data-cy="account-status">Active</el-tag>
+          <el-tag v-else type="info" data-cy="account-status">Inactive</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="Average Total Score" min-width="100px" fixed>
         <template #default="{ row }">
           {{ row.averageTotalScore.toFixed(2) }}
